@@ -1,0 +1,15 @@
+@"
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+
+# Configuración local específica de cada PC (rutas, IPs)
+dll.par
+
+# Node-RED (si acabas exportando el proyecto completo en vez de solo el JSON del flujo)
+node_modules/
+"@ | Out-File -Encoding utf8 .gitignore

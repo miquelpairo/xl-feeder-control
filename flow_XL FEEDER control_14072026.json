@@ -1,0 +1,776 @@
+[
+    {
+        "id": "87925ace8cbdac62",
+        "type": "tab",
+        "label": "XL Feeder Control",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "8c6f33d98363a691",
+        "type": "inject",
+        "z": "87925ace8cbdac62",
+        "name": "Estado inicial",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "once": true,
+        "onceDelay": 0.3,
+        "topic": "",
+        "payload": "{\"estado\":\"Motor parado\",\"color\":\"#9e9e9e\",\"detalle\":\"Esperando datos...\"}",
+        "payloadType": "json",
+        "x": 1240,
+        "y": 600,
+        "wires": [
+            [
+                "ca6062a7095ce970"
+            ]
+        ]
+    },
+    {
+        "id": "fe7228de1ee200f9",
+        "type": "inject",
+        "z": "87925ace8cbdac62",
+        "name": "Cada 5s (API real)",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "5",
+        "once": true,
+        "onceDelay": 1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 350,
+        "y": 700,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "41034a1d60750751",
+        "type": "http request",
+        "z": "87925ace8cbdac62",
+        "name": "GET estado NIR",
+        "method": "GET",
+        "ret": "obj",
+        "url": "http://localhost:10034/1",
+        "x": 620,
+        "y": 700,
+        "wires": [
+            [
+                "54fcb28460b7eea5"
+            ]
+        ]
+    },
+    {
+        "id": "54fcb28460b7eea5",
+        "type": "function",
+        "z": "87925ace8cbdac62",
+        "name": "Detectar cruce lead-in",
+        "func": "const UMBRAL_S = 10;\nconst VELOCIDAD = flow.get('velocidadDeseada') || 3;\nconst TIMEOUT_SEGURIDAD_S = 180;\n\nconst body = msg.payload || {};\nconst leadInStr = (body.UDP_State && body.UDP_State.LeadIn) || \"00:00\";\nconst stateInfo = body.StateInfo || \"\";\n\nconst partes = leadInStr.split(\":\").map(Number);\nconst leadInSeg = partes.length === 2 ? partes[0] * 60 + partes[1] : 0;\n\nlet motorActivo = flow.get('motorActivo') || false;\nlet prevStateInfo = flow.get('prevStateInfo') || \"\";\nlet activadoEn = flow.get('activadoEn') || null;\n\nconst estadoMsg = { payload: {\n    estado: motorActivo ? \"Motor activo\" : \"Motor parado\",\n    color: motorActivo ? \"#2e7d32\" : \"#9e9e9e\",\n    detalleBase: `${stateInfo} | LeadIn=${leadInSeg}s`,\n    activadoEn: motorActivo ? activadoEn : null,\n    timeoutTotal: TIMEOUT_SEGURIDAD_S\n}};\n\nlet accionMsg = null;\nlet logMsg = null;\n\nif (!motorActivo && stateInfo !== \"Measuring\" && leadInSeg > 0 && leadInSeg <= UMBRAL_S) {\n    flow.set('motorActivo', true);\n    flow.set('activadoEn', Date.now());\n    flow.set('prevStateInfo', stateInfo);\n    accionMsg = { payload: { velocidad: VELOCIDAD } };\n    logMsg = { evento: `Arranque automático a LeadIn=${leadInSeg}s` };\n    estadoMsg.payload.estado = \"Motor activo\";\n    estadoMsg.payload.color = \"#2e7d32\";\n    estadoMsg.payload.activadoEn = flow.get('activadoEn');\n    node.status({ fill: \"green\", text: `ARRANCA a LeadIn=${leadInSeg}s` });\n}\nelse if (motorActivo && prevStateInfo === \"Measuring\" && stateInfo === \"Waiting for sample\") {\n    flow.set('motorActivo', false);\n    flow.set('activadoEn', null);\n    flow.set('prevStateInfo', stateInfo);\n    accionMsg = { payload: \"desactivar\" };\n    logMsg = { evento: \"Parada automática (fin de medición)\" };\n    estadoMsg.payload.estado = \"Motor parado\";\n    estadoMsg.payload.color = \"#9e9e9e\";\n    estadoMsg.payload.activadoEn = null;\n    node.status({ fill: \"grey\", text: \"PARA (fin de medición)\" });\n}\nelse if (motorActivo && activadoEn && (Date.now() - activadoEn) / 1000 > TIMEOUT_SEGURIDAD_S) {\n    flow.set('motorActivo', false);\n    flow.set('activadoEn', null);\n    flow.set('prevStateInfo', stateInfo);\n    accionMsg = { payload: \"desactivar\" };\n    logMsg = { evento: `Parada por TIMEOUT de seguridad (${TIMEOUT_SEGURIDAD_S}s)` };\n    estadoMsg.payload.estado = \"Motor parado (timeout)\";\n    estadoMsg.payload.color = \"#c62828\";\n    estadoMsg.payload.activadoEn = null;\n    node.status({ fill: \"red\", text: `PARA por timeout (${TIMEOUT_SEGURIDAD_S}s)` });\n}\nelse {\n    flow.set('prevStateInfo', stateInfo);\n\n    if (motorActivo && activadoEn) {\n        const restante = Math.max(0, TIMEOUT_SEGURIDAD_S - Math.floor((Date.now() - activadoEn) / 1000));\n        node.status({\n            fill: \"green\",\n            text: `${stateInfo} | LeadIn=${leadInSeg}s | timeout en ${restante}s`\n        });\n    } else {\n        node.status({\n            fill: motorActivo ? \"green\" : \"grey\",\n            text: `${stateInfo} | LeadIn=${leadInSeg}s`\n        });\n    }\n}\n\nreturn [accionMsg, logMsg, estadoMsg];",
+        "outputs": 3,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 960,
+        "y": 700,
+        "wires": [
+            [
+                "9d02cc3c28c31f4c"
+            ],
+            [
+                "80f7ce9d91dc0643"
+            ],
+            [
+                "ca6062a7095ce970"
+            ]
+        ]
+    },
+    {
+        "id": "2f14be6ed1147a9c",
+        "type": "ui_button",
+        "z": "87925ace8cbdac62",
+        "d": true,
+        "name": "Activar manual",
+        "group": "0981c3340180712c",
+        "order": 2,
+        "label": "▶ ACTIVAR MANUAL",
+        "color": "",
+        "bgcolor": "#2e7d32",
+        "payload": "manual_on",
+        "payloadType": "str",
+        "x": 320,
+        "y": 880,
+        "wires": [
+            [
+                "074056561152d05f"
+            ]
+        ]
+    },
+    {
+        "id": "2c994de479357f56",
+        "type": "ui_button",
+        "z": "87925ace8cbdac62",
+        "d": true,
+        "name": "Detener",
+        "group": "0981c3340180712c",
+        "order": 3,
+        "label": "■ DETENER",
+        "color": "",
+        "bgcolor": "#c62828",
+        "payload": "manual_off",
+        "payloadType": "str",
+        "x": 340,
+        "y": 940,
+        "wires": [
+            [
+                "074056561152d05f"
+            ]
+        ]
+    },
+    {
+        "id": "074056561152d05f",
+        "type": "function",
+        "z": "87925ace8cbdac62",
+        "name": "Override manual",
+        "func": "const VELOCIDAD = flow.get('velocidadDeseada') || 3;\nconst TIMEOUT_SEGURIDAD_S = 180;\n\nif (msg.payload === \"manual_on\") {\n    const ahora = Date.now();\n    flow.set('motorActivo', true);\n    flow.set('activadoEn', ahora);\n    flow.set('prevStateInfo', 'Manual');\n\n    const accion = { payload: { velocidad: VELOCIDAD } };\n    const log = { evento: `Activación MANUAL (${VELOCIDAD}V)` };\n    const estado = { payload: {\n        estado: \"Motor activo (manual)\",\n        color: \"#2e7d32\",\n        detalleBase: \"Activado por botón\",\n        activadoEn: ahora,\n        timeoutTotal: TIMEOUT_SEGURIDAD_S\n    }};\n    node.status({ fill: \"green\", text: \"ACTIVADO MANUALMENTE\" });\n    return [accion, log, estado];\n}\n\nif (msg.payload === \"manual_off\") {\n    flow.set('motorActivo', false);\n    flow.set('activadoEn', null);\n    flow.set('prevStateInfo', 'Waiting for sample');\n\n    const accion = { payload: \"desactivar\" };\n    const log = { evento: \"Detención MANUAL\" };\n    const estado = { payload: {\n        estado: \"Motor parado\",\n        color: \"#9e9e9e\",\n        detalleBase: \"Detenido por botón\",\n        activadoEn: null,\n        timeoutTotal: TIMEOUT_SEGURIDAD_S\n    }};\n    node.status({ fill: \"grey\", text: \"DETENIDO MANUALMENTE\" });\n    return [accion, log, estado];\n}\n\nnode.status({});\nreturn [null, null, null];",
+        "outputs": 3,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 710,
+        "y": 890,
+        "wires": [
+            [
+                "9d02cc3c28c31f4c"
+            ],
+            [
+                "80f7ce9d91dc0643"
+            ],
+            [
+                "ca6062a7095ce970"
+            ]
+        ]
+    },
+    {
+        "id": "ca6062a7095ce970",
+        "type": "ui_template",
+        "z": "87925ace8cbdac62",
+        "group": "0981c3340180712c",
+        "name": "Estado motor",
+        "order": 1,
+        "width": 6,
+        "height": 4,
+        "format": "<div style=\"padding:20px; font-family:'Segoe UI', Roboto, sans-serif;\">\n  <div style=\"display:flex; align-items:center; gap:18px;\">\n    <div ng-style=\"{\n        'width':'48px','height':'48px','min-width':'48px','border-radius':'50%',\n        'background-color':color,\n        'box-shadow': (color === '#2e7d32' ? '0 0 18px 4px rgba(46,125,50,0.6)' : (color === '#c62828' ? '0 0 18px 4px rgba(198,40,40,0.6)' : 'none')),\n        'transition':'all 0.4s ease'\n    }\"></div>\n    <div>\n      <div style=\"font-size:26px; font-weight:700; color:#fff; line-height:1.2;\">{{estado}}</div>\n      <div style=\"font-size:14px; color:#9e9e9e; margin-top:4px;\">{{baseDetalle}}</div>\n    </div>\n  </div>\n\n  <div ng-if=\"activadoEn\" style=\"margin-top:18px;\">\n    <div style=\"display:flex; justify-content:space-between; font-size:13px; color:#9e9e9e; margin-bottom:6px;\">\n      <span>Tiempo restante</span>\n      <span style=\"font-weight:600; color:#fff; font-size:16px;\">{{restante}}s</span>\n    </div>\n    <div style=\"background:#333; border-radius:6px; height:10px; overflow:hidden;\">\n      <div ng-style=\"{'width': (100 * restante / timeoutTotal) + '%', 'background-color': color, 'height':'100%', 'transition':'width 1s linear'}\"></div>\n    </div>\n  </div>\n</div>\n\n<script>\n(function(scope){\n    scope.$watch('msg', function(msg) {\n        if (!msg || !msg.payload) return;\n\n        if (scope.interval) {\n            clearInterval(scope.interval);\n            scope.interval = null;\n        }\n\n        scope.estado = msg.payload.estado;\n        scope.color = msg.payload.color;\n        scope.baseDetalle = msg.payload.detalleBase || \"\";\n        scope.activadoEn = msg.payload.activadoEn || null;\n        scope.timeoutTotal = msg.payload.timeoutTotal || 1;\n\n        function actualizar() {\n            if (scope.activadoEn) {\n                scope.restante = Math.max(0, scope.timeoutTotal - Math.floor((Date.now() - scope.activadoEn) / 1000));\n            }\n        }\n\n        actualizar();\n        if (scope.activadoEn) {\n            scope.interval = setInterval(function() {\n                actualizar();\n                scope.$apply();\n            }, 1000);\n        }\n    });\n})(scope);\n</script>",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": false,
+        "templateScope": "local",
+        "x": 1490,
+        "y": 690,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "80f7ce9d91dc0643",
+        "type": "function",
+        "z": "87925ace8cbdac62",
+        "name": "Registrar evento",
+        "func": "let log = flow.get('eventLog') || [];\nconst hora = new Date().toLocaleTimeString('es-ES');\nlog.unshift(`${hora} — ${msg.evento}`);\nlog = log.slice(0, 20);\nflow.set('eventLog', log);\n\nmsg.payload = log;\nreturn msg;",
+        "outputs": 1,
+        "x": 980,
+        "y": 960,
+        "wires": [
+            [
+                "bc0b1afb7bdde208"
+            ]
+        ]
+    },
+    {
+        "id": "bc0b1afb7bdde208",
+        "type": "ui_template",
+        "z": "87925ace8cbdac62",
+        "group": "778be0d41df54080",
+        "name": "Registro de eventos",
+        "order": 2,
+        "width": 6,
+        "height": 6,
+        "format": "<div style=\"font-family:monospace;font-size:12px;max-height:220px;overflow-y:auto;\">\n  <div ng-repeat=\"linea in msg.payload\" style=\"padding:2px 0;border-bottom:1px solid #333;\">{{linea}}</div>\n</div>",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": false,
+        "templateScope": "local",
+        "x": 1210,
+        "y": 960,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "9d02cc3c28c31f4c",
+        "type": "switch",
+        "z": "87925ace8cbdac62",
+        "name": "¿Activar o Desactivar?",
+        "property": "payload",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "istype",
+                "v": "string",
+                "vt": "string"
+            },
+            {
+                "t": "istype",
+                "v": "object",
+                "vt": "string"
+            }
+        ],
+        "checkall": "true",
+        "outputs": 2,
+        "x": 950,
+        "y": 820,
+        "wires": [
+            [
+                "f20397f9746ad87d"
+            ],
+            [
+                "d2a884ec05facb2d"
+            ]
+        ]
+    },
+    {
+        "id": "d2a884ec05facb2d",
+        "type": "http request",
+        "z": "87925ace8cbdac62",
+        "name": "POST /activar",
+        "method": "POST",
+        "ret": "obj",
+        "url": "http://localhost:5000/activar",
+        "headers": [
+            {
+                "keyType": "Content-Type",
+                "keyValue": "",
+                "valueType": "other",
+                "valueValue": "application/json"
+            }
+        ],
+        "x": 1180,
+        "y": 790,
+        "wires": [
+            [
+                "58ebb27622be60b8"
+            ]
+        ]
+    },
+    {
+        "id": "f20397f9746ad87d",
+        "type": "http request",
+        "z": "87925ace8cbdac62",
+        "name": "POST /desactivar",
+        "method": "POST",
+        "ret": "obj",
+        "url": "http://localhost:5000/desactivar",
+        "x": 1180,
+        "y": 850,
+        "wires": [
+            [
+                "58ebb27622be60b8"
+            ]
+        ]
+    },
+    {
+        "id": "58ebb27622be60b8",
+        "type": "debug",
+        "z": "87925ace8cbdac62",
+        "name": "Resultado",
+        "active": true,
+        "x": 1390,
+        "y": 820,
+        "wires": []
+    },
+    {
+        "id": "4dff463b5342c762",
+        "type": "ui_template",
+        "z": "87925ace8cbdac62",
+        "group": "0981c3340180712c",
+        "name": "",
+        "order": 5,
+        "width": 0,
+        "height": 0,
+        "format": "<div style=\"display:flex; gap:12px; padding:8px 0;\">\n  <button ng-click=\"send({payload:'manual_on'})\"\n    style=\"flex:1; padding:18px; font-size:16px; font-weight:700; letter-spacing:0.5px;\n           background:#2e7d32; color:#fff; border:none; border-radius:10px; cursor:pointer;\n           box-shadow:0 2px 6px rgba(0,0,0,0.3);\">\n    ▶ ACTIVAR MANUAL\n  </button>\n  <button ng-click=\"send({payload:'manual_off'})\"\n    style=\"flex:1; padding:18px; font-size:16px; font-weight:700; letter-spacing:0.5px;\n           background:#c62828; color:#fff; border:none; border-radius:10px; cursor:pointer;\n           box-shadow:0 2px 6px rgba(0,0,0,0.3);\">\n    ■ DETENER\n  </button>\n</div>",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "x": 420,
+        "y": 780,
+        "wires": [
+            [
+                "074056561152d05f"
+            ]
+        ]
+    },
+    {
+        "id": "64dbe190b3abc7cc",
+        "type": "inject",
+        "z": "87925ace8cbdac62",
+        "name": "Measuring",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"StateInfo\": \"Measuring\", \"UDP_State\": {\"LeadIn\": \"00:00\"}}",
+        "payloadType": "json",
+        "x": 480,
+        "y": 500,
+        "wires": [
+            [
+                "54fcb28460b7eea5"
+            ]
+        ]
+    },
+    {
+        "id": "18a4884bcee6af5e",
+        "type": "inject",
+        "z": "87925ace8cbdac62",
+        "name": "Detectar cruce lead-in",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{   \"StateInfo\": \"Waiting for sample\",   \"UDP_State\": {     \"LeadIn\": \"00:07\"   } }",
+        "payloadType": "json",
+        "x": 240,
+        "y": 540,
+        "wires": [
+            [
+                "54fcb28460b7eea5"
+            ]
+        ]
+    },
+    {
+        "id": "9e5c29ec656c8b3e",
+        "type": "inject",
+        "z": "87925ace8cbdac62",
+        "name": "Detectar fin de muestra ",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"StateInfo\": \"Waiting for sample\", \"UDP_State\": {\"LeadIn\": \"00:00\"}}",
+        "payloadType": "json",
+        "x": 840,
+        "y": 520,
+        "wires": [
+            [
+                "54fcb28460b7eea5"
+            ]
+        ]
+    },
+    {
+        "id": "inject-ping",
+        "type": "inject",
+        "z": "87925ace8cbdac62",
+        "name": "Ping Flask cada 10s",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "10",
+        "once": true,
+        "onceDelay": 0.5,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 420,
+        "y": 300,
+        "wires": [
+            [
+                "http-ping",
+                "fn-check-cooldown"
+            ]
+        ]
+    },
+    {
+        "id": "http-ping",
+        "type": "http request",
+        "z": "87925ace8cbdac62",
+        "name": "GET /estado",
+        "method": "GET",
+        "ret": "obj",
+        "url": "http://localhost:5000/estado",
+        "x": 640,
+        "y": 300,
+        "wires": [
+            [
+                "fn-ping-ok"
+            ]
+        ]
+    },
+    {
+        "id": "fn-ping-ok",
+        "type": "function",
+        "z": "87925ace8cbdac62",
+        "name": "Servidor OK",
+        "func": "msg.payload = { conectado: true, texto: \"Servidor Flask: conectado\" };\nreturn msg;",
+        "outputs": 1,
+        "x": 850,
+        "y": 300,
+        "wires": [
+            [
+                "ui-flask-status"
+            ]
+        ]
+    },
+    {
+        "id": "fn-ping-fail",
+        "type": "function",
+        "z": "87925ace8cbdac62",
+        "name": "Servidor caído",
+        "func": "msg.payload = { conectado: false, texto: \"Servidor Flask: SIN CONEXIÓN\" };\nreturn msg;",
+        "outputs": 1,
+        "x": 850,
+        "y": 360,
+        "wires": [
+            [
+                "ui-flask-status"
+            ]
+        ]
+    },
+    {
+        "id": "ui-flask-status",
+        "type": "ui_template",
+        "z": "87925ace8cbdac62",
+        "group": "0981c3340180712c",
+        "name": "Estado servidor Flask",
+        "order": 4,
+        "width": 6,
+        "height": 1,
+        "format": "<div style=\"display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;\">\n  <div ng-style=\"{'width':'8px','height':'8px','border-radius':'50%','background-color': msg.payload.conectado ? '#2e7d32' : '#c62828'}\"></div>\n  <span style=\"color:#888;\">{{msg.payload.texto}}</span>\n</div>",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": false,
+        "templateScope": "local",
+        "x": 1070,
+        "y": 320,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "status-ping",
+        "type": "status",
+        "z": "87925ace8cbdac62",
+        "name": "Vigilar estado GET /estado",
+        "scope": [
+            "http-ping"
+        ],
+        "x": 330,
+        "y": 400,
+        "wires": [
+            [
+                "fn-ping-status"
+            ]
+        ]
+    },
+    {
+        "id": "fn-ping-status",
+        "type": "function",
+        "z": "87925ace8cbdac62",
+        "name": "Interpretar status",
+        "func": "if (msg.status.fill === 'red') {\n    msg.payload = { conectado: false, texto: \"Servidor Flask: SIN CONEXIÓN (\" + msg.status.text + \")\" };\n    return msg;\n}\nreturn null;",
+        "outputs": 1,
+        "x": 610,
+        "y": 400,
+        "wires": [
+            [
+                "fn-ping-fail"
+            ]
+        ]
+    },
+    {
+        "id": "inject-poll-log",
+        "type": "inject",
+        "z": "87925ace8cbdac62",
+        "name": "Consultar log cada 3s",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "3",
+        "once": true,
+        "onceDelay": 1,
+        "payload": "",
+        "payloadType": "date",
+        "x": 280,
+        "y": 60,
+        "wires": [
+            [
+                "http-get-log"
+            ]
+        ]
+    },
+    {
+        "id": "http-get-log",
+        "type": "http request",
+        "z": "87925ace8cbdac62",
+        "name": "GET /log",
+        "method": "GET",
+        "ret": "obj",
+        "url": "http://localhost:5000/log",
+        "x": 500,
+        "y": 60,
+        "wires": [
+            [
+                "ui-server-log"
+            ]
+        ]
+    },
+    {
+        "id": "ui-server-log",
+        "type": "ui_template",
+        "z": "87925ace8cbdac62",
+        "group": "778be0d41df54080",
+        "name": "Consola servidor",
+        "order": 1,
+        "width": 6,
+        "height": 8,
+        "format": "<div style=\"font-family:'Consolas',monospace; font-size:11px; max-height:300px; overflow-y:auto; padding:6px; background:#111; border-radius:6px;\">\n  <div ng-repeat=\"linea in msg.payload\" style=\"padding:3px 6px; color:#8fce8f; border-bottom:1px solid #222;\">{{linea}}</div>\n</div>",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": false,
+        "templateScope": "local",
+        "x": 730,
+        "y": 60,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "inject-startup",
+        "type": "inject",
+        "z": "87925ace8cbdac62",
+        "name": "Al arrancar Node-RED",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "once": true,
+        "onceDelay": 3,
+        "payload": "",
+        "payloadType": "date",
+        "x": 180,
+        "y": 160,
+        "wires": [
+            [
+                "fn-check-cooldown"
+            ]
+        ]
+    },
+    {
+        "id": "fn-check-cooldown",
+        "type": "function",
+        "z": "87925ace8cbdac62",
+        "name": "¿Puedo intentar arrancar?",
+        "func": "const ultimoIntento = flow.get('ultimoIntentoArranque') || 0;\nconst COOLDOWN_S = 60;\n\nif ((Date.now() - ultimoIntento) / 1000 < COOLDOWN_S) {\n    node.status({ fill: \"yellow\", text: \"En cooldown, no se reintenta aún\" });\n    return null;\n}\nflow.set('ultimoIntentoArranque', Date.now());\nreturn msg;",
+        "outputs": 1,
+        "x": 460,
+        "y": 180,
+        "wires": [
+            [
+                "exec-check"
+            ]
+        ]
+    },
+    {
+        "id": "exec-check",
+        "type": "exec",
+        "z": "87925ace8cbdac62",
+        "command": "powershell -NoProfile -Command \"(Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'python.exe' -or $_.Name -eq 'pythonw.exe') -and $_.CommandLine -like '*servidor_datalab.py*' }).ProcessId\"",
+        "addpay": false,
+        "append": "",
+        "useSpawn": "false",
+        "timer": "10",
+        "winHide": false,
+        "name": "¿Está corriendo?",
+        "x": 700,
+        "y": 180,
+        "wires": [
+            [
+                "fn-decide-launch"
+            ],
+            [],
+            []
+        ]
+    },
+    {
+        "id": "fn-decide-launch",
+        "type": "function",
+        "z": "87925ace8cbdac62",
+        "name": "¿Lanzar?",
+        "func": "const salida = (msg.payload || \"\").toString().trim();\nif (salida === \"\") {\n    node.status({ fill: \"red\", text: \"No estaba corriendo. Lanzando...\" });\n    return msg;\n}\nnode.status({ fill: \"green\", text: `Ya corriendo (PID ${salida})` });\nreturn null;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 910,
+        "y": 180,
+        "wires": [
+            [
+                "exec-launch"
+            ]
+        ]
+    },
+    {
+        "id": "exec-launch",
+        "type": "exec",
+        "z": "87925ace8cbdac62",
+        "command": "cmd /c start \"\" \"C:\\Users\\pairo\\AppData\\Local\\Programs\\Python\\Python313-32\\pythonw.exe\" \"C:\\XL Feeder Control\\servidor_datalab.py\"",
+        "addpay": false,
+        "append": "",
+        "useSpawn": "false",
+        "timer": "10",
+        "name": "Lanzar servidor",
+        "x": 1140,
+        "y": 180,
+        "wires": [
+            [],
+            [],
+            []
+        ]
+    },
+    {
+        "id": "ui-velocidad",
+        "type": "ui_template",
+        "z": "87925ace8cbdac62",
+        "group": "0981c3340180712c",
+        "name": "Control de velocidad",
+        "order": 6,
+        "width": 6,
+        "height": 3,
+        "format": "<div style=\"padding:10px 4px;\">\n  <div style=\"display:flex; justify-content:space-between; font-size:13px; color:#9e9e9e; margin-bottom:6px;\">\n    <span>Velocidad (canal 5)</span>\n    <span>{{velocidad}} V</span>\n  </div>\n  <input type=\"range\" min=\"0\" max=\"9\" step=\"0.1\" ng-model=\"velocidad\" ng-change=\"onSlider()\"\n    style=\"width:100%;\">\n  <div style=\"display:flex; gap:10px; align-items:center; margin-top:10px;\">\n    <input type=\"number\" min=\"0\" max=\"9\" step=\"0.1\" ng-model=\"velocidad\" ng-change=\"onTexto()\"\n      style=\"width:80px; padding:6px; background:#222; color:#fff; border:1px solid #444; border-radius:6px;\">\n    <span style=\"font-size:12px; color:#666;\">0-9V</span>\n  </div>\n</div>\n\n<script>\n(function(scope){\n    scope.velocidad = 3;\n    scope.timer = null;\n\n    scope.enviar = function() {\n        scope.send({ payload: { velocidad: scope.velocidad } });\n    };\n\n    scope.onSlider = function() {\n        if (scope.timer) clearTimeout(scope.timer);\n        scope.timer = setTimeout(function(){\n            scope.enviar();\n            scope.$apply();\n        }, 300);\n    };\n\n    scope.onTexto = function() {\n        if (scope.timer) clearTimeout(scope.timer);\n        scope.timer = setTimeout(function(){\n            scope.enviar();\n            scope.$apply();\n        }, 500);\n    };\n\n    scope.$watch('msg', function(msg) {\n        if (msg && msg.payload && typeof msg.payload.velocidad === 'number') {\n            scope.velocidad = msg.payload.velocidad;\n        }\n    });\n})(scope);\n</script>",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": false,
+        "templateScope": "local",
+        "x": 340,
+        "y": 1140,
+        "wires": [
+            [
+                "fn-set-velocidad"
+            ]
+        ]
+    },
+    {
+        "id": "fn-set-velocidad",
+        "type": "function",
+        "z": "87925ace8cbdac62",
+        "name": "Aplicar velocidad",
+        "func": "const v = msg.payload.velocidad;\nflow.set('velocidadDeseada', v);\nnode.status({fill:\"blue\", text:`Velocidad -> ${v}V`});\nmsg.payload = { velocidad: v };\nmsg.url = \"http://localhost:5000/velocidad\";\nreturn msg;",
+        "outputs": 1,
+        "x": 610,
+        "y": 1140,
+        "wires": [
+            [
+                "http-set-velocidad"
+            ]
+        ]
+    },
+    {
+        "id": "http-set-velocidad",
+        "type": "http request",
+        "z": "87925ace8cbdac62",
+        "name": "POST /velocidad",
+        "method": "POST",
+        "ret": "obj",
+        "url": "http://localhost:5000/velocidad",
+        "headers": [
+            {
+                "keyType": "Content-Type",
+                "keyValue": "",
+                "valueType": "other",
+                "valueValue": "application/json"
+            }
+        ],
+        "x": 840,
+        "y": 1140,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "0981c3340180712c",
+        "type": "ui_group",
+        "name": "Control Motor",
+        "tab": "5f475b9e7d61746f",
+        "order": 1,
+        "width": "6"
+    },
+    {
+        "id": "778be0d41df54080",
+        "type": "ui_group",
+        "name": "Registro de Eventos",
+        "tab": "5f475b9e7d61746f",
+        "order": 2,
+        "disp": true,
+        "width": "6",
+        "collapse": false
+    },
+    {
+        "id": "5f475b9e7d61746f",
+        "type": "ui_tab",
+        "name": "XL Feeder Motor",
+        "icon": "dashboard",
+        "order": 1,
+        "disabled": false,
+        "hidden": false
+    }
+]
