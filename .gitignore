@@ -1,4 +1,3 @@
-@"
 # Logs
 logs/
 *.log
@@ -7,9 +6,8 @@ logs/
 __pycache__/
 *.pyc
 
-# Configuración local específica de cada PC (rutas, IPs)
+# Configuración local de cada PC (rutas, IPs)
 dll.par
 
-# Node-RED (si acabas exportando el proyecto completo en vez de solo el JSON del flujo)
+# Node-RED (si se exporta el proyecto completo)
 node_modules/
-"@ | Out-File -Encoding utf8 .gitignore
