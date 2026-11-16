@@ -12,6 +12,12 @@ RUTA_PAR = r"C:\XL Feeder Control\dll.par"
 CANAL_ACTIVACION = 100
 CANAL_VELOCIDAD = 104
 
+# Rango admisible de la salida analógica de velocidad (voltios)
+VELOCIDAD_MIN_V = 0.0
+VELOCIDAD_MAX_V = 10.0
+# Velocidad fija que se aplica al activar (la del flujo se ajusta luego con /velocidad)
+VELOCIDAD_ACTIVAR_V = 6
+
 app = Flask(__name__)
 
 # --- Registro de eventos en memoria, consultable por Node-RED ---
@@ -81,31 +87,60 @@ def bombear(segundos=0.5):
 def voltios_a_counts(voltios):
     return str(round(voltios * 400))
 
+
+def validar_velocidad(valor):
+    """Convierte a float y comprueba el rango. Lanza ValueError si no es válido."""
+    try:
+        v = float(valor)
+    except (TypeError, ValueError):
+        raise ValueError(f"velocidad no numérica: {valor!r}")
+    if v != v or not (VELOCIDAD_MIN_V <= v <= VELOCIDAD_MAX_V):   # v != v -> NaN
+        raise ValueError(f"velocidad fuera de rango ({VELOCIDAD_MIN_V}-{VELOCIDAD_MAX_V} V): {v}")
+    return v
+
+
+# Último resultado de comunicación con el DataLab (lo devuelve /estado)
+estado_datalab = {"ultima_operacion": None, "ultimo_ok": None, "ultimo_error": None}
+
+
+def registrar(ok, error=None):
+    estado_datalab["ultima_operacion"] = datetime.now().isoformat(timespec="seconds")
+    estado_datalab["ultimo_ok"] = ok
+    estado_datalab["ultimo_error"] = None if ok else str(error)
+
 @app.route('/activar', methods=['POST'])
 def activar():
     data = request.get_json(silent=True) or {}
     try:
         datalab.MarkOutput(CANAL_ACTIVACION, voltios_a_counts(9))
-        datalab.MarkOutput(CANAL_VELOCIDAD, voltios_a_counts(6))  # fijo a 3V por ahora
+        datalab.MarkOutput(CANAL_VELOCIDAD, voltios_a_counts(VELOCIDAD_ACTIVAR_V))
         datalab.WriteOutputs()
         bombear()
-        log("Activado. Velocidad=1V (fijo)")
-        return jsonify({"status": "ok", "velocidad": 6})
+        registrar(True)
+        log(f"Activado. Velocidad={VELOCIDAD_ACTIVAR_V}V (fija al activar)")
+        return jsonify({"status": "ok", "velocidad": VELOCIDAD_ACTIVAR_V})
     except Exception as e:
+        registrar(False, e)
         log(f"✗ ERROR en /activar: {e}")
         return jsonify({"status": "error", "detalle": str(e)}), 500
 
 @app.route('/velocidad', methods=['POST'])
 def set_velocidad():
     data = request.get_json(silent=True) or {}
-    velocidad_v = data.get('velocidad', 3)
+    try:
+        velocidad_v = validar_velocidad(data.get('velocidad', 3))
+    except ValueError as e:
+        log(f"✗ /velocidad rechazada: {e}")
+        return jsonify({"status": "error", "detalle": str(e)}), 400
     try:
         datalab.MarkOutput(CANAL_VELOCIDAD, voltios_a_counts(velocidad_v))
         datalab.WriteOutputs()
         bombear()
+        registrar(True)
         log(f"Velocidad ajustada a {velocidad_v}V")
         return jsonify({"status": "ok", "velocidad": velocidad_v})
     except Exception as e:
+        registrar(False, e)
         log(f"✗ ERROR en /velocidad: {e}")
         return jsonify({"status": "error", "detalle": str(e)}), 500
 
@@ -115,16 +150,24 @@ def desactivar():
         datalab.MarkOutput(CANAL_ACTIVACION, "0")
         datalab.WriteOutputs()
         bombear()
+        registrar(True)
         log("Desactivado.")
         return jsonify({"status": "ok"})
     except Exception as e:
+        registrar(False, e)
         log(f"✗ ERROR en /desactivar: {e}")
         return jsonify({"status": "error", "detalle": str(e)}), 500
 
 
 @app.route('/estado', methods=['GET'])
 def estado():
-    return jsonify({"status": "servidor activo", "datalab": "conectado"})
+    # "status" se mantiene igual (Node-RED solo mira que responda).
+    # "datalab" refleja la última escritura: "conectado", "error" o "sin operaciones".
+    if estado_datalab["ultimo_ok"] is None:
+        dl = "sin operaciones"
+    else:
+        dl = "conectado" if estado_datalab["ultimo_ok"] else "error"
+    return jsonify({"status": "servidor activo", "datalab": dl, **estado_datalab})
 
 
 @app.route('/log', methods=['GET'])
